@@ -1,11 +1,11 @@
 CC ?= gcc
-CROSS_COMPILE ?= aarch64-linux-non-gnu-
+CROSS_COMPILE ?= aarch64-none-linux-gnu-
 SERVER_CC = $(CROSS_COMPILE)$(CC)
 
-CFLAGS := -Wall -g
+CFLAGS := -Wall -Wextra -g -Iinclude
 LDFLAGS := -lpthread
 
-SRCS := src/server.c src/threadpool.c src/protocol.c src/file_ops.c src/lod.c
+SRCS := src/main.c src/server.c src/threadpool.c src/protocol.c src/file_ops.c src/log.c
 
 BUILD_HOST := build/host
 BUILD_A64 := build/aarch64

@@ -4,13 +4,13 @@
 #include <string.h>
 
 
-typdef struct task_node {
+typedef struct task_node {
     client_task_t task;
     struct task_node *next;
 } task_node_t;
 
-struct thead_pool {
-    pthead_t *threads;
+struct thread_pool {
+    pthread_t *threads;
     int thread_count;
     task_node_t *head;
     task_node_t *tail;
@@ -119,7 +119,7 @@ int thread_pool_submit(thread_pool_t *pool, const client_task_t *task) {
     pthread_mutex_lock(&pool->mtx);
 
     if(pool->stop) {
-        pyhread_mutex_unlock(&pool->mtx);
+        pthread_mutex_unlock(&pool->mtx);
         free(node);
         return -1;
     }

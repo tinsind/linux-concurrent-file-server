@@ -49,3 +49,45 @@
 ## 九、续接提示
 - 用户偏好：不直接代改核心代码，优先给可手敲模板。
 - 继续会话时可从 `server.c` 最小并发链路开始。
+
+## 十、今晚会话汇总（2026-03-04 夜间）
+
+### 1) 工作方式确认（非常重要）
+- 用户明确要求：**自己手敲代码加强记忆**。
+- Copilot 工作模式调整为：
+	- 不直接改核心源码；
+	- 在会话中给“可直接敲入文件的完整代码 + 分段解释”；
+	- 逐文件推进并按编译报错迭代。
+
+### 2) 代码现状（以当前仓库为准）
+- `src/protocol.c`：已实现可靠收发（`send_all/recv_all`）+ 头部字节序转换。
+- `src/threadpool.c`：线程池主逻辑已具备（创建/投递/销毁 + worker 循环）。
+- `src/log.c`、`src/file_ops.c`、`src/server.c`、`src/main.c`：处于手敲推进阶段（其中部分内容被撤销过，需以当前文件内容为准）。
+
+### 3) 今晚出现过的关键报错（要点）
+- 链接错误：`undefined reference to main`（入口函数未完成）。
+- 日志模块：`va_start/va_end` 相关报错（本质是缺少 `<stdarg.h>` 导致）。
+- 终端状态曾出现 `make clean` 返回 `127`（环境/PATH 异常时会出现；若再次出现，优先检查 `make` 是否可用）。
+
+### 4) 已达成的共识实现策略
+- 先保证服务端“最小可启动链路”：
+	1. `main.c`：参数解析并调用 `run_server`；
+	2. `server.c`：`socket/bind/listen/accept` + 投递线程池 + 会话循环；
+	3. `file_ops.c`：先打通 `LIST`；`GET/PUT` 可先返回“未实现”状态；
+	4. `log.c`：统一时间戳日志、客户端连接/断开日志。
+- 每完成一个文件就编译一次，避免堆积错误。
+
+### 5) 明天换电脑后的第一条指令（建议）
+- 进入目录：`cd /home/tronlong/rk3562/projects/linux-concurrent-file-server/v1_threadpool`
+- 先做工具链自检：`which make && make -v && which cc && cc --version | head -n 1`
+- 再编译：`make clean && make server_host`
+
+### 6) 明日续接顺序（严格按此）
+1. 先确认 `src/log.c` 可独立通过编译（特别是 `<stdarg.h>`）。
+2. 完成 `src/main.c`（解决 `main` 缺失）。
+3. 完成 `src/server.c` 最小并发框架。
+4. 完成 `src/file_ops.c` 的 `handle_list`。
+5. 启动服务端进行最小联调：`./server_host 0.0.0.0 9000 4`。
+
+### 7) 给下一次会话的提示词
+- “按手敲模式继续，不直接改文件。先检查 `v1_threadpool` 当前四个源文件（main/server/file_ops/log）并给我逐文件可敲代码和解释，从编译可启动优先。”
