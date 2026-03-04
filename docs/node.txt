@@ -1,0 +1,51 @@
+# 会话同步记录（node.txt）
+
+更新时间：2026-03-04
+
+## 一、项目目标
+- 当前优先做 v1：线程池并发文件服务器。
+- 后续再做 v2：epoll 版本。
+- 功能：`list/get/put/quit`，支持多客户端并发，服务端打印客户端访问时间。
+
+## 二、部署与编译结论
+- 服务端运行在板子（AArch64），客户端在虚拟机（x86_64/Linux）。
+- 两端编译器不同没问题，关键是协议一致。
+- 网络传输必须做字节序转换：`htonl/htons/ntohl/ntohs`。
+
+## 三、协议与类型约定
+- 协议头 `msg_header_t`：`magic/cmd/status/length`。
+- `length` 建议统一 `uint32_t`（避免 `size_t` 在 32/64 位差异）。
+- `send_all/recv_all` 返回值使用 `ssize_t`。
+- `__attribute__((packed))` 在 GCC/Clang 可用；Windows 本地可能仅是静态检查误报。
+
+## 四、当前 v1_threadpool 结构
+- 目录已搭好，`include/*.h` 基本齐全。
+- `src/` 包含：`main.c server.c threadpool.c protocol.c file_ops.c log.c`。
+- 目前开发方式：用户手敲代码，Copilot 提供分文件模板与解释。
+
+## 五、已确认的关键修正点
+- `protocol_io.h` 的 include guard 需独立（不能和 `protocol.h` 一样）。
+- `protocol.c` 使用可靠收发循环，并处理 `EINTR`。
+- `send_header/recv_header` 已按网络字节序思路实现。
+
+## 六、已给出的 threadpool.c 模板要点
+- 线程池结构：线程数组 + 任务队列 + 互斥锁 + 条件变量 + stop 标志。
+- API：`thread_pool_create / thread_pool_submit / thread_pool_destroy`。
+- worker 流程：等待任务 -> 出队 -> 调 handler -> 释放节点。
+- 重点：handler 中要确保 `close(client_fd)`，避免 fd 泄漏。
+
+## 七、Git 网络排查结论
+- 之前 HTTPS push 报 reset 与 VPN 节点稳定性相关。
+- 实测 `ls-remote` 与 `push --dry-run` 可通，非仓库配置根因。
+- 若偶发失败：切 VPN 节点，或改 SSH 远程推送。
+
+## 八、下一步建议（按顺序）
+1. 完成 `threadpool.c` 并编译通过。
+2. 完成 `server.c` 最小骨架：`accept -> submit -> worker session`。
+3. 先打通 `list`，再补 `get/put`。
+4. 加入日志时间戳打印（连接/退出）。
+5. 最后完善 `Makefile` 的 host/aarch64 双目标。
+
+## 九、续接提示
+- 用户偏好：不直接代改核心代码，优先给可手敲模板。
+- 继续会话时可从 `server.c` 最小并发链路开始。

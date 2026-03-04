@@ -1,4 +1,4 @@
-#include "../include/protocol_io.h"
+#include "protocol_io.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
