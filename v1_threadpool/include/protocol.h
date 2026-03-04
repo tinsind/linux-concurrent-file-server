@@ -19,7 +19,7 @@ typedef struct {
     uint32_t length;    // Length of the payload
 
 } msg_header_t;
-//} __attribute__((packed)) msg_header_t;
+/*} __attribute__((packed)) msg_header_t;*/
 
 
 

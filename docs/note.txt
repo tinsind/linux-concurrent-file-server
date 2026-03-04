@@ -1,0 +1,126 @@
+# linux-concurrent-file-server 开发续接笔记（会话整理）
+
+更新时间：2026-03-04
+
+## 1. 项目目标与版本规划
+
+- 目标：实现并发文件服务器（类似简化 FTP），支持 `list/get/put/quit`。
+- 要求：
+	1) 多客户端并发。
+	2) 上传或下载功能中体现多线程/多进程（v1 采用线程池，满足要求）。
+	3) 服务端打印每个客户端访问日期时间信息。
+- 版本规划：
+	- v1：线程池管理客户端连接（当前优先）。
+	- v2：epoll 进阶版（后续再做）。
+
+## 2. 运行/部署场景（关键）
+
+- 服务端最终运行在板子上（AArch64）。
+- 客户端运行在虚拟机上（x86_64/Linux）。
+- 编译器不同是正常的，核心是：
+	- 双方协议字段定义必须一致。
+	- 传输要做字节序转换（`htonl/htons/ntohl/ntohs`）。
+
+## 3. 协议与 packed 结论
+
+- `__attribute__((packed))` 是 GCC/Clang 扩展。
+- 最终 AArch64 交叉工具链（gcc/clang）可用此语法。
+- Windows 本地编辑器可能误报（IntelliSense 按 MSVC 规则）。
+- 当前 `msg_header_t` 字段布局（4+2+2+4）通常本来就是 12 字节，但 `packed` 可显式保证布局。
+
+## 4. Git / 网络排查结论
+
+- 遇到过：
+	`fatal: unable to access ... Recv failure: Connection was reset`
+- 已验证：
+	- `git ls-remote origin` 可通。
+	- `git push --dry-run origin HEAD` 可通。
+	- `git status -sb` 显示 `main...origin/main [ahead 1]`（当时尚未真实 push）。
+- 判断：更像 VPN 节点链路不稳定导致偶发 reset，不是仓库配置根因。
+- 备选方案：切稳定节点；或改 SSH remote（通常更稳）。
+
+## 5. 当前 v1_threadpool 目录状态（会话时）
+
+目录：`v1_threadpool/`
+
+- 已有：
+	- `include/`: `protocol.h`, `protocol_io.h`, `threadpool.h`, `file_ops.h`, `log.h`, `server.h`
+	- `src/`: `main.c`, `server.c`, `threadpool.c`, `protocol.c`, `file_ops.c`, `log.c`
+	- `Makefile`, `README.md`
+- 当时情况：大部分 `src/*.c` 为空骨架（需要手敲实现）。
+
+## 6. 已发现的头文件问题（优先修）
+
+### 6.1 protocol_io.h include guard 冲突
+
+- 你当前 `protocol_io.h` 误用了 `__PROTOCOL_H__`，会和 `protocol.h` 冲突。
+- 应改为独立宏，例如 `__PROTOCOL_IO_H__`。
+
+### 6.2 长度类型统一
+
+- `msg_header_t.length` 是 `uint32_t`。
+- `send_header(..., length)` 建议参数也用 `uint32_t`，避免 `size_t` 在不同位宽平台差异。
+
+### 6.3 I/O 函数返回值
+
+- `send_all/recv_all` 建议返回 `ssize_t`，不是 `size_t`。
+- 需包含 `<sys/types.h>`。
+
+## 7. 已给出的建议模板（你可按此手敲）
+
+### 7.1 protocol_io.h 建议接口
+
+- `ssize_t send_all(int fd, const void *buf, size_t len);`
+- `ssize_t recv_all(int fd, void *buf, size_t len);`
+- `int send_header(int fd, uint16_t cmd, uint16_t status, uint32_t length);`
+- `int recv_header(int fd, msg_header_t *header);`
+
+### 7.2 protocol.c 核心职责
+
+- 实现 `send_all/recv_all`（处理 `EINTR`，循环发/收直到完成）。
+- `send_header`：按网络字节序填充 header 并发送。
+- `recv_header`：接收后做反转换并校验 `MAGIC_NUMBER`。
+
+### 7.3 v1 架构分工
+
+- 主线程：`socket/bind/listen/accept`，把连接投递到线程池。
+- worker 线程：执行单客户端 session 循环。
+- session 内按命令分发：`LIST/GET/PUT/QUIT`。
+- 连接建立/退出都打印带时间戳的客户端日志。
+
+### 7.4 file_ops.c 功能建议
+
+- `handle_list`：目录遍历并回传列表。
+- `handle_get`：发送文件大小（建议 8 字节）+ 分块发送文件。
+- `handle_put`：接收文件大小 + 分块写盘。
+
+### 7.5 Makefile 思路（双编译器）
+
+- 本机构建：`server_host`（`gcc`）。
+- 交叉构建：`server_aarch64`（`aarch64-linux-gnu-gcc`）。
+- 可通过 `CROSS_COMPILE` 覆盖工具链前缀。
+
+## 8. 下一台电脑继续开发的建议顺序
+
+1) 先修 `include/protocol_io.h`（guard + 类型 + 头文件）。
+2) 完成 `src/protocol.c`（可靠收发 + 字节序）。
+3) 完成 `src/threadpool.c`（任务队列 + 互斥锁 + 条件变量）。
+4) 完成 `src/server.c`（accept 投递 + 命令分发）。
+5) 完成 `src/file_ops.c`（list/get/put）。
+6) 完成 `src/log.c`（时间戳+客户端地址日志）。
+7) 完成 `src/main.c`（参数解析与启动）。
+8) Makefile 增加 host/aarch64 双目标并验证。
+
+## 9. 联调清单（最小）
+
+- 单客户端：`help/list/get/put/quit` 全通。
+- 多客户端：至少 2~3 个客户端并发请求，服务端不阻塞。
+- 文件一致性：上传后 md5/sha256 比较（可选）。
+- 异常路径：不存在文件、空文件、超长文件名、客户端异常断开。
+
+## 10. 续接提示（给后续 Copilot）
+
+- 用户偏好：希望“我手敲代码加强记忆”，不要直接改文件；优先在会话给分文件模板和解释。
+- 当前重点：v1 线程池版本先跑通，再做 v2 epoll。
+- 语言偏好：中文。
+
