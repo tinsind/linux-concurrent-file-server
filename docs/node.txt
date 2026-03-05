@@ -140,3 +140,71 @@
 2. 启动服务端：`./server/server_host 0.0.0.0 9000 4`
 3. 启动客户端：`./client/client_host <server_ip> 9000`
 4. 在客户端交互测试：`list`、`get <file>`、`put <file>`、`quit`
+
+## 十二、今晚新增进展（2026-03-05，补充）
+
+### 1) AArch64 交叉编译报错已定位并修复
+- 现象：`make server_aarch64` 时调用了 `aarch64-none-linux-gnu-cc`，报“没有那个文件或目录”。
+- 根因：Make 内置默认 `CC=cc`，原写法 `SERVER_CC = $(CROSS_COMPILE)$(CC)` 被拼成 `...-cc`。
+- 处理：`v1_threadpool/Makefile` 已改为显式交叉编译器变量：
+	- `AARCH64_CC ?= $(CROSS_COMPILE)gcc`
+	- AArch64 的编译/链接规则统一使用 `$(AARCH64_CC)`。
+- 结论：避免了 `CC=cc` 污染，交叉编译行为稳定。
+
+### 2) 并发压测脚本已新增
+- 新文件：`v1_threadpool/scripts/stress_test.sh`
+- 功能：并发启动多个客户端会话，每个会话执行 `list -> put -> get -> quit`。
+- 参数：
+	- `<server_ip> <port> [并发数] [每客户端循环次数] [文件大小KB]`
+	- 默认：并发 `5`、循环 `3`、文件 `64KB`。
+- 运行前提：`client/client_host` 可执行（先 `make client_host`）。
+
+### 3) 远端板子 + 本地PC 的压测方式确认
+- 板子上：只运行服务端 `server_aarch64`。
+- PC 上：在 `v1_threadpool/` 目录执行 `scripts/stress_test.sh`。
+- 若服务端在板子，脚本的 `<server_ip>` 填板子 IP。
+
+### 4) 本次压测实绩（已通过）
+- 配置：`concurrency=8`、`loops=5`、`payload=128KB`
+- 结果：
+	- 会话失败数：`0`
+	- `PUT` 成功：`40/40`
+	- `GET` 成功：`40/40`
+	- `ERROR` 行数：`0`
+	- 结论：`[PASS]`，v1 当前并发链路稳定。
+
+### 5) 临时文件与清理说明（重要）
+- 脚本在 PC 端创建临时目录：`/tmp/cfs_stress_*`。
+- 脚本已使用 `trap cleanup EXIT` 自动删除临时目录（含日志与测试文件）。
+- 仅在异常终止（如 `kill -9`）时可能残留，可手动清理：
+	- `rm -rf /tmp/cfs_stress_*`
+- 注意：`put` 上传到服务端后的文件会留在板子服务端工作目录，不会被脚本自动删除。
+	- 可在板子服务端目录按需清理：`rm -f put_c*_r*.bin`
+
+### 6) 明天续接建议（最短路径）
+1. 先复现一轮基础压测：`./scripts/stress_test.sh <board_ip> 9000 8 5 128`
+2. 再做一轮高压：`./scripts/stress_test.sh <board_ip> 9000 20 20 256`
+3. 若需要定位异常，再将脚本改为“失败保留日志、成功自动清理”。
+
+## 十二、本次续接进展（2026-03-05，继续）
+
+### 1) 已读取会话记录并完成代码收尾
+- 已按 `docs/` 历史记录对齐当前状态，确认 v1_threadpool 主体功能仍是：`list/get/put/quit` + 线程池并发。
+
+### 2) 新完成的稳定性修正
+- `include/protocol.h`
+	- 将 `msg_header_t` 改为明确 `packed` 布局（GCC/Clang 下启用）。
+	- 新增 `_Static_assert(sizeof(msg_header_t) == 12)`，防止跨平台结构体尺寸漂移。
+- `src/log.c`
+	- 修复 `log_client_event()` 在 `addr == NULL` 时 `ip` 未初始化的隐患，默认填充为 `unknown-ip`。
+
+### 3) 当前状态
+- 编辑器诊断显示上述文件无错误。
+- 本次会话中终端构建步骤被跳过（未执行 `make` 实编译）。
+
+### 4) 下一个最小动作（建议）
+1. 在可用终端执行：`cd /home/tronlong/rk3562/projects/linux-concurrent-file-server/v1_threadpool`
+2. 执行：`make clean && make server_host && make client_host`
+3. 本机双终端联调：
+	 - 服务端：`./server/server_host 0.0.0.0 9000 4`
+	 - 客户端：`./client/client_host 127.0.0.1 9000`

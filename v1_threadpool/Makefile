@@ -1,6 +1,6 @@
 CC ?= gcc
 CROSS_COMPILE ?= aarch64-none-linux-gnu-
-SERVER_CC = $(CROSS_COMPILE)$(CC)
+AARCH64_CC ?= $(CROSS_COMPILE)gcc
 
 CFLAGS := -Wall -Wextra -g -Iinclude
 LDFLAGS := -lpthread
@@ -42,7 +42,7 @@ $(SERVER_HOST_BIN): $(SERVER_OBJS_HOST)
 
 $(SERVER_A64_BIN): $(SERVER_OBJS_A64)
 	@mkdir -p $(dir $@)
-	$(SERVER_CC) $(SERVER_OBJS_A64) -o $@ $(LDFLAGS)
+	$(AARCH64_CC) $(SERVER_OBJS_A64) -o $@ $(LDFLAGS)
 
 $(CLIENT_HOST_BIN): $(CLIENT_OBJS_HOST)
 	@mkdir -p $(dir $@)
@@ -50,7 +50,7 @@ $(CLIENT_HOST_BIN): $(CLIENT_OBJS_HOST)
 
 $(CLIENT_A64_BIN): $(CLIENT_OBJS_A64)
 	@mkdir -p $(dir $@)
-	$(SERVER_CC) $(CLIENT_OBJS_A64) -o $@ $(LDFLAGS)
+	$(AARCH64_CC) $(CLIENT_OBJS_A64) -o $@ $(LDFLAGS)
 
 $(BUILD_HOST)/%.o: src/%.c
 	@mkdir -p $(dir $@)
@@ -58,7 +58,7 @@ $(BUILD_HOST)/%.o: src/%.c
 
 $(BUILD_A64)/%.o: src/%.c
 	@mkdir -p $(dir $@)
-	$(SERVER_CC) $(CFLAGS) -c $< -o $@
+	$(AARCH64_CC) $(CFLAGS) -c $< -o $@
 
 clean:
 	rm -rf build $(SERVER_HOST_BIN) $(SERVER_A64_BIN) $(CLIENT_HOST_BIN) $(CLIENT_A64_BIN) server_host server_aarch64 client_host client_aarch64

@@ -52,6 +52,8 @@ static void format_now(char *buf, size_t len) {
         event = "(null)";
     }
 
+    snprintf(ip, sizeof(ip), "unknown-ip");
+
     if(addr != NULL) {
         if(inet_ntop(AF_INET, &addr->sin_addr, ip, sizeof(ip)) == NULL) {
             snprintf(ip, sizeof(ip), "invalid-ip");
