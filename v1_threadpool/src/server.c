@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#define MAX_FILENAME_LEN 4096
 
 static void drain_payload(int cfd, uint32_t len) {
     char buf[1024];
@@ -58,7 +59,7 @@ static void client_handler(client_task_t *task) {
             }
         } else if (h.cmd == CMD_GET || h.cmd == CMD_PUT) {
             char *filename = NULL;
-            if (h.length == 0 || recv_filename(cfd, h.length, &filename) < 0) {
+            if (h.length == 0 || h.length > MAX_FILENAME_LEN || recv_filename(cfd, h.length, &filename) < 0) {
                 send_header(cfd, h.cmd, 1, 0);
                 break;
             }

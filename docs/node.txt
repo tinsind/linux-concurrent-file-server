@@ -1,6 +1,6 @@
 # 会话同步记录（node.txt）
 
-更新时间：2026-03-04
+更新时间：2026-03-05
 
 ## 一、项目目标
 - 当前优先做 v1：线程池并发文件服务器。
@@ -91,3 +91,52 @@
 
 ### 7) 给下一次会话的提示词
 - “按手敲模式继续，不直接改文件。先检查 `v1_threadpool` 当前四个源文件（main/server/file_ops/log）并给我逐文件可敲代码和解释，从编译可启动优先。”
+
+## 十一、今天续接进展（2026-03-05）
+
+### 1) 环境结论
+- 当前 Windows 机器无 `make`，本次不做编译验证，只推进代码实现。
+
+### 2) 已完成代码推进
+- `src/file_ops.c`：
+	- `handle_list` 过滤了 `.` 和 `..`。
+	- `handle_get` 从“未实现”改为真实发送文件：`open/fstat/send_header/send_all`。
+	- `handle_put` 从“未实现”改为真实接收文件：读取后续 `CMD_PUT` 数据头，再按长度接收并写盘。
+	- 增加基础安全检查：拒绝空文件名、路径分隔符、`..`。
+- `src/server.c`：
+	- 对 `GET/PUT` 的文件名长度增加上限检查（`MAX_FILENAME_LEN=4096`），避免异常大包导致不安全分配。
+
+### 3) 当前约定（PUT 交互）
+- 服务端现在按“两段式 PUT”处理：
+	1. 客户端先发 `CMD_PUT`（payload=文件名）；
+	2. 客户端再发 `CMD_PUT`（payload=文件内容，length=文件字节数）；
+	3. 服务端写盘后回 `CMD_PUT status=0`。
+
+### 4) 回到生产环境后的验证建议
+1. `make clean && make server_host`
+2. 先测 `LIST/GET`（只读路径最稳）
+3. 再按“两段式 PUT”测上传
+4. 若客户端 PUT 协议不一致，再统一调整客户端打包逻辑
+
+### 5) 新增客户端代码（2026-03-05）
+- 已新增 `v1_threadpool/src/client.c`（交互式命令行客户端）。
+- 支持命令：`list` / `get <file>` / `put <file>` / `quit`。
+- `PUT` 已按服务端当前约定实现“两段式 PUT”。
+- 对应 Make 目标：`make client_host` -> 输出 `client/client_host`。
+
+### 6) Makefile 输出目录调整（2026-03-05）
+- 用户要求：可执行文件按角色分目录，源码仍在 `src/`。
+- 已完成：
+	- 服务端可执行输出到 `v1_threadpool/server/`。
+	- 客户端可执行输出到 `v1_threadpool/client/`。
+- 当前目标与输出：
+	- `make server_host` -> `server/server_host`
+	- `make server_aarch64` -> `server/server_aarch64`
+	- `make client_host` -> `client/client_host`
+	- `make client_aarch64` -> `client/client_aarch64`
+
+### 7) 当前联调入口（回生产环境后）
+1. 编译服务端与客户端：`make clean && make server_host && make client_host`
+2. 启动服务端：`./server/server_host 0.0.0.0 9000 4`
+3. 启动客户端：`./client/client_host <server_ip> 9000`
+4. 在客户端交互测试：`list`、`get <file>`、`put <file>`、`quit`
