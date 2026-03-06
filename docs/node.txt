@@ -1,210 +1,50 @@
-# 会话同步记录（node.txt）
+# 会话同步记录（精简版）
 
-更新时间：2026-03-05
+更新时间：2026-03-06
 
-## 一、项目目标
-- 当前优先做 v1：线程池并发文件服务器。
-- 后续再做 v2：epoll 版本。
-- 功能：`list/get/put/quit`，支持多客户端并发，服务端打印客户端访问时间。
+## 1. 当前项目状态
+- `v1_threadpool`：已完成并发文件服务器（线程池版），`list/get/put/quit` 可用。
+- `v2_epoll`：已创建并实现 `epoll` 单进程事件循环版本（同级新目录）。
+- 运行环境约束：目标是 Linux（板子 AArch64 + 客户端 x86_64/Linux）。
 
-## 二、部署与编译结论
-- 服务端运行在板子（AArch64），客户端在虚拟机（x86_64/Linux）。
-- 两端编译器不同没问题，关键是协议一致。
-- 网络传输必须做字节序转换：`htonl/htons/ntohl/ntohs`。
+## 2. 已落地的关键实现
+- 协议头固定为 `msg_header_t(12B)`，字段：`magic/cmd/status/length`。
+- 字节序统一：`htonl/htons/ntohl/ntohs`。
+- `v1` 与 `v2` 都兼容命令：`list/get/put/quit`。
+- `PUT` 约定：两段式。
+  1) `CMD_PUT` + 文件名 payload。
+  2) `CMD_PUT` + 文件数据 payload（`length=文件大小`）。
+  3) 服务端返回 `CMD_PUT status=0`。
 
-## 三、协议与类型约定
-- 协议头 `msg_header_t`：`magic/cmd/status/length`。
-- `length` 建议统一 `uint32_t`（避免 `size_t` 在 32/64 位差异）。
-- `send_all/recv_all` 返回值使用 `ssize_t`。
-- `__attribute__((packed))` 在 GCC/Clang 可用；Windows 本地可能仅是静态检查误报。
+## 3. v1_threadpool 结论
+- 压测已通过（记录样例：`8 并发 * 5 轮 * 128KB` 全通过）。
+- `v1_threadpool/scripts/stress_test.sh` 已改为：
+  - 成功自动清理临时目录。
+  - 失败默认保留日志目录，便于排查。
 
-## 四、当前 v1_threadpool 结构
-- 目录已搭好，`include/*.h` 基本齐全。
-- `src/` 包含：`main.c server.c threadpool.c protocol.c file_ops.c log.c`。
-- 目前开发方式：用户手敲代码，Copilot 提供分文件模板与解释。
+## 4. v2_epoll 当前结构
+- 目录：`v2_epoll/`
+- 关键文件：
+  - `v2_epoll/src/main.c`
+  - `v2_epoll/src/server.c`
+  - `v2_epoll/src/protocol.c`
+  - `v2_epoll/src/client.c`
+  - `v2_epoll/Makefile`
+  - `v2_epoll/README.md`
+- `v2_epoll/src/server.c` 曾误删，已恢复。
 
-## 五、已确认的关键修正点
-- `protocol_io.h` 的 include guard 需独立（不能和 `protocol.h` 一样）。
-- `protocol.c` 使用可靠收发循环，并处理 `EINTR`。
-- `send_header/recv_header` 已按网络字节序思路实现。
+## 5. 已知说明
+- Windows 下 VS Code 的 Linux 头文件报错（如 `epoll.h/unistd.h`）属于环境问题，不代表 Linux 实际编译失败。
+- `v2_epoll` 目前在 Git 中通常显示为未跟踪目录（`?? v2_epoll/`）。
 
-## 六、已给出的 threadpool.c 模板要点
-- 线程池结构：线程数组 + 任务队列 + 互斥锁 + 条件变量 + stop 标志。
-- API：`thread_pool_create / thread_pool_submit / thread_pool_destroy`。
-- worker 流程：等待任务 -> 出队 -> 调 handler -> 释放节点。
-- 重点：handler 中要确保 `close(client_fd)`，避免 fd 泄漏。
+## 6. 换机后最短继续路径
+1. `cd <repo>/v2_epoll`
+2. `make clean && make server_host && make client_host`
+3. 服务端：`./server/server_host 0.0.0.0 9000`
+4. 客户端：`./client/client_host <server_ip> 9000`
+5. 压测：`./scripts/stress_test.sh <server_ip> 9000 8 5 128`
 
-## 七、Git 网络排查结论
-- 之前 HTTPS push 报 reset 与 VPN 节点稳定性相关。
-- 实测 `ls-remote` 与 `push --dry-run` 可通，非仓库配置根因。
-- 若偶发失败：切 VPN 节点，或改 SSH 远程推送。
-
-## 八、下一步建议（按顺序）
-1. 完成 `threadpool.c` 并编译通过。
-2. 完成 `server.c` 最小骨架：`accept -> submit -> worker session`。
-3. 先打通 `list`，再补 `get/put`。
-4. 加入日志时间戳打印（连接/退出）。
-5. 最后完善 `Makefile` 的 host/aarch64 双目标。
-
-## 九、续接提示
-- 用户偏好：不直接代改核心代码，优先给可手敲模板。
-- 继续会话时可从 `server.c` 最小并发链路开始。
-
-## 十、今晚会话汇总（2026-03-04 夜间）
-
-### 1) 工作方式确认（非常重要）
-- 用户明确要求：**自己手敲代码加强记忆**。
-- Copilot 工作模式调整为：
-	- 不直接改核心源码；
-	- 在会话中给“可直接敲入文件的完整代码 + 分段解释”；
-	- 逐文件推进并按编译报错迭代。
-
-### 2) 代码现状（以当前仓库为准）
-- `src/protocol.c`：已实现可靠收发（`send_all/recv_all`）+ 头部字节序转换。
-- `src/threadpool.c`：线程池主逻辑已具备（创建/投递/销毁 + worker 循环）。
-- `src/log.c`、`src/file_ops.c`、`src/server.c`、`src/main.c`：处于手敲推进阶段（其中部分内容被撤销过，需以当前文件内容为准）。
-
-### 3) 今晚出现过的关键报错（要点）
-- 链接错误：`undefined reference to main`（入口函数未完成）。
-- 日志模块：`va_start/va_end` 相关报错（本质是缺少 `<stdarg.h>` 导致）。
-- 终端状态曾出现 `make clean` 返回 `127`（环境/PATH 异常时会出现；若再次出现，优先检查 `make` 是否可用）。
-
-### 4) 已达成的共识实现策略
-- 先保证服务端“最小可启动链路”：
-	1. `main.c`：参数解析并调用 `run_server`；
-	2. `server.c`：`socket/bind/listen/accept` + 投递线程池 + 会话循环；
-	3. `file_ops.c`：先打通 `LIST`；`GET/PUT` 可先返回“未实现”状态；
-	4. `log.c`：统一时间戳日志、客户端连接/断开日志。
-- 每完成一个文件就编译一次，避免堆积错误。
-
-### 5) 明天换电脑后的第一条指令（建议）
-- 进入目录：`cd /home/tronlong/rk3562/projects/linux-concurrent-file-server/v1_threadpool`
-- 先做工具链自检：`which make && make -v && which cc && cc --version | head -n 1`
-- 再编译：`make clean && make server_host`
-
-### 6) 明日续接顺序（严格按此）
-1. 先确认 `src/log.c` 可独立通过编译（特别是 `<stdarg.h>`）。
-2. 完成 `src/main.c`（解决 `main` 缺失）。
-3. 完成 `src/server.c` 最小并发框架。
-4. 完成 `src/file_ops.c` 的 `handle_list`。
-5. 启动服务端进行最小联调：`./server_host 0.0.0.0 9000 4`。
-
-### 7) 给下一次会话的提示词
-- “按手敲模式继续，不直接改文件。先检查 `v1_threadpool` 当前四个源文件（main/server/file_ops/log）并给我逐文件可敲代码和解释，从编译可启动优先。”
-
-## 十一、今天续接进展（2026-03-05）
-
-### 1) 环境结论
-- 当前 Windows 机器无 `make`，本次不做编译验证，只推进代码实现。
-
-### 2) 已完成代码推进
-- `src/file_ops.c`：
-	- `handle_list` 过滤了 `.` 和 `..`。
-	- `handle_get` 从“未实现”改为真实发送文件：`open/fstat/send_header/send_all`。
-	- `handle_put` 从“未实现”改为真实接收文件：读取后续 `CMD_PUT` 数据头，再按长度接收并写盘。
-	- 增加基础安全检查：拒绝空文件名、路径分隔符、`..`。
-- `src/server.c`：
-	- 对 `GET/PUT` 的文件名长度增加上限检查（`MAX_FILENAME_LEN=4096`），避免异常大包导致不安全分配。
-
-### 3) 当前约定（PUT 交互）
-- 服务端现在按“两段式 PUT”处理：
-	1. 客户端先发 `CMD_PUT`（payload=文件名）；
-	2. 客户端再发 `CMD_PUT`（payload=文件内容，length=文件字节数）；
-	3. 服务端写盘后回 `CMD_PUT status=0`。
-
-### 4) 回到生产环境后的验证建议
-1. `make clean && make server_host`
-2. 先测 `LIST/GET`（只读路径最稳）
-3. 再按“两段式 PUT”测上传
-4. 若客户端 PUT 协议不一致，再统一调整客户端打包逻辑
-
-### 5) 新增客户端代码（2026-03-05）
-- 已新增 `v1_threadpool/src/client.c`（交互式命令行客户端）。
-- 支持命令：`list` / `get <file>` / `put <file>` / `quit`。
-- `PUT` 已按服务端当前约定实现“两段式 PUT”。
-- 对应 Make 目标：`make client_host` -> 输出 `client/client_host`。
-
-### 6) Makefile 输出目录调整（2026-03-05）
-- 用户要求：可执行文件按角色分目录，源码仍在 `src/`。
-- 已完成：
-	- 服务端可执行输出到 `v1_threadpool/server/`。
-	- 客户端可执行输出到 `v1_threadpool/client/`。
-- 当前目标与输出：
-	- `make server_host` -> `server/server_host`
-	- `make server_aarch64` -> `server/server_aarch64`
-	- `make client_host` -> `client/client_host`
-	- `make client_aarch64` -> `client/client_aarch64`
-
-### 7) 当前联调入口（回生产环境后）
-1. 编译服务端与客户端：`make clean && make server_host && make client_host`
-2. 启动服务端：`./server/server_host 0.0.0.0 9000 4`
-3. 启动客户端：`./client/client_host <server_ip> 9000`
-4. 在客户端交互测试：`list`、`get <file>`、`put <file>`、`quit`
-
-## 十二、今晚新增进展（2026-03-05，补充）
-
-### 1) AArch64 交叉编译报错已定位并修复
-- 现象：`make server_aarch64` 时调用了 `aarch64-none-linux-gnu-cc`，报“没有那个文件或目录”。
-- 根因：Make 内置默认 `CC=cc`，原写法 `SERVER_CC = $(CROSS_COMPILE)$(CC)` 被拼成 `...-cc`。
-- 处理：`v1_threadpool/Makefile` 已改为显式交叉编译器变量：
-	- `AARCH64_CC ?= $(CROSS_COMPILE)gcc`
-	- AArch64 的编译/链接规则统一使用 `$(AARCH64_CC)`。
-- 结论：避免了 `CC=cc` 污染，交叉编译行为稳定。
-
-### 2) 并发压测脚本已新增
-- 新文件：`v1_threadpool/scripts/stress_test.sh`
-- 功能：并发启动多个客户端会话，每个会话执行 `list -> put -> get -> quit`。
-- 参数：
-	- `<server_ip> <port> [并发数] [每客户端循环次数] [文件大小KB]`
-	- 默认：并发 `5`、循环 `3`、文件 `64KB`。
-- 运行前提：`client/client_host` 可执行（先 `make client_host`）。
-
-### 3) 远端板子 + 本地PC 的压测方式确认
-- 板子上：只运行服务端 `server_aarch64`。
-- PC 上：在 `v1_threadpool/` 目录执行 `scripts/stress_test.sh`。
-- 若服务端在板子，脚本的 `<server_ip>` 填板子 IP。
-
-### 4) 本次压测实绩（已通过）
-- 配置：`concurrency=8`、`loops=5`、`payload=128KB`
-- 结果：
-	- 会话失败数：`0`
-	- `PUT` 成功：`40/40`
-	- `GET` 成功：`40/40`
-	- `ERROR` 行数：`0`
-	- 结论：`[PASS]`，v1 当前并发链路稳定。
-
-### 5) 临时文件与清理说明（重要）
-- 脚本在 PC 端创建临时目录：`/tmp/cfs_stress_*`。
-- 脚本已使用 `trap cleanup EXIT` 自动删除临时目录（含日志与测试文件）。
-- 仅在异常终止（如 `kill -9`）时可能残留，可手动清理：
-	- `rm -rf /tmp/cfs_stress_*`
-- 注意：`put` 上传到服务端后的文件会留在板子服务端工作目录，不会被脚本自动删除。
-	- 可在板子服务端目录按需清理：`rm -f put_c*_r*.bin`
-
-### 6) 明天续接建议（最短路径）
-1. 先复现一轮基础压测：`./scripts/stress_test.sh <board_ip> 9000 8 5 128`
-2. 再做一轮高压：`./scripts/stress_test.sh <board_ip> 9000 20 20 256`
-3. 若需要定位异常，再将脚本改为“失败保留日志、成功自动清理”。
-
-## 十二、本次续接进展（2026-03-05，继续）
-
-### 1) 已读取会话记录并完成代码收尾
-- 已按 `docs/` 历史记录对齐当前状态，确认 v1_threadpool 主体功能仍是：`list/get/put/quit` + 线程池并发。
-
-### 2) 新完成的稳定性修正
-- `include/protocol.h`
-	- 将 `msg_header_t` 改为明确 `packed` 布局（GCC/Clang 下启用）。
-	- 新增 `_Static_assert(sizeof(msg_header_t) == 12)`，防止跨平台结构体尺寸漂移。
-- `src/log.c`
-	- 修复 `log_client_event()` 在 `addr == NULL` 时 `ip` 未初始化的隐患，默认填充为 `unknown-ip`。
-
-### 3) 当前状态
-- 编辑器诊断显示上述文件无错误。
-- 本次会话中终端构建步骤被跳过（未执行 `make` 实编译）。
-
-### 4) 下一个最小动作（建议）
-1. 在可用终端执行：`cd /home/tronlong/rk3562/projects/linux-concurrent-file-server/v1_threadpool`
-2. 执行：`make clean && make server_host && make client_host`
-3. 本机双终端联调：
-	 - 服务端：`./server/server_host 0.0.0.0 9000 4`
-	 - 客户端：`./client/client_host 127.0.0.1 9000`
+## 7. 下一步建议
+1. 在 Linux 环境先做 `v2` 功能联调（`list/get/put/quit`）。
+2. 跑同参数压测，对比 `v1` 与 `v2`（吞吐、延迟、CPU）。
+3. 若 `v2` 稳定，再考虑 `EPOLLET`、写缓冲策略和大文件传输优化。
